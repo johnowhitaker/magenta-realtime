@@ -698,16 +698,6 @@ function App() {
     return (loopSeconds - phase) * 1000;
   };
 
-  const scheduleCountInClicks = (waitMs: number) => {
-    if (!metronomeEnabledRef.current) return;
-    if (waitMs <= 0) return;
-    const beats = Math.max(1, Math.ceil(waitMs / (beatSeconds * 1000)));
-    for (let i = 0; i < beats; i++) {
-      const delay = Math.max(0, waitMs - (beats - i) * beatSeconds * 1000);
-      timersRef.current.push(window.setTimeout(() => playMetronomeClick(i === 0), delay));
-    }
-  };
-
   const updateCountdown = (target: 'audio' | 'midi', trackId: string, startMs: number, durationMs: number) => {
     const tick = window.setInterval(() => {
       const now = performance.now();
@@ -746,7 +736,6 @@ function App() {
     const durationMs = trackDuration(trackId) * 1000;
     setStatus(wait > 0 ? 'Audio armed. Recording starts at this loop start.' : 'Recording audio loop.');
     updateCountdown('audio', trackId, startMs, durationMs);
-    scheduleCountInClicks(wait);
     timersRef.current.push(window.setTimeout(() => recorder.start(), wait));
     timersRef.current.push(window.setTimeout(() => recorder.stop(), wait + durationMs));
   };
@@ -837,7 +826,6 @@ function App() {
     const durationMs = seconds * 1000;
     setStatus(wait > 0 ? 'MIDI armed. Recording starts at this loop start.' : 'Recording MIDI loop.');
     updateCountdown('midi', trackId, startMs, durationMs);
-    scheduleCountInClicks(wait);
     timersRef.current.push(window.setTimeout(() => {
       midiNotesRef.current = [];
       midiRecordStartRef.current = getAudioContext().currentTime;
