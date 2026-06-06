@@ -5,6 +5,7 @@
     "common/react_ui",
     "mrt2/react_ui",
     "jam/ui",
+    "looper",
     "collider/ui"
   ]
 }

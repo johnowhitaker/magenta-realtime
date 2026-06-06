@@ -1,3 +1,6 @@
 [submodule "magenta_rt/_vendor/sequence-layers"]
 	path = magenta_rt/_vendor/sequence-layers
 	url = https://github.com/magenta/sequence-layers.git
+[submodule "third_party/stable-audio-3"]
+	path = third_party/stable-audio-3
+	url = https://github.com/Stability-AI/stable-audio-3.git
