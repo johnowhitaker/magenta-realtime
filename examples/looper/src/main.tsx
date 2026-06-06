@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {
   Bot,
-  Circle,
   Disc3,
   Mic,
   Pause,
@@ -30,7 +29,10 @@ type Track = {
   transformedBuffer: AudioBuffer | null;
   playbackMode: 'source' | 'transformed';
   promptStrength: number;
+  stableAudioCfg: number;
   initNoiseLevel: number;
+  key: string;
+  offsetMs: number;
   drumless: boolean;
   doubleGenerate: boolean;
   smoothFade: boolean;
@@ -60,6 +62,33 @@ const DEFAULT_PROMPTS = [
   'motorik krautrock pulse, warm cassette',
   'glitchy teenage engineering pocket orchestra',
 ];
+const KEY_OPTIONS = [
+  'None',
+  'C major',
+  'C# major',
+  'D major',
+  'D# major',
+  'E major',
+  'F major',
+  'F# major',
+  'G major',
+  'G# major',
+  'A major',
+  'A# major',
+  'B major',
+  'C minor',
+  'C# minor',
+  'D minor',
+  'D# minor',
+  'E minor',
+  'F minor',
+  'F# minor',
+  'G minor',
+  'G# minor',
+  'A minor',
+  'A# minor',
+  'B minor',
+];
 
 function makeTrack(index: number, kind: TrackKind = 'audio'): Track {
   return {
@@ -72,10 +101,13 @@ function makeTrack(index: number, kind: TrackKind = 'audio'): Track {
     transformedBuffer: null,
     playbackMode: 'source',
     promptStrength: 3,
-    initNoiseLevel: 0.5,
+    stableAudioCfg: 1,
+    initNoiseLevel: 0.35,
+    key: 'None',
+    offsetMs: 0,
     drumless: false,
-    doubleGenerate: false,
-    smoothFade: false,
+    doubleGenerate: true,
+    smoothFade: true,
     volume: 0.8,
     active: true,
     armed: index === 0,
@@ -317,16 +349,34 @@ function getTrackSeconds(track: Track, bpm: number) {
   return barsToSeconds(track.bars, bpm);
 }
 
-function makeWaveformPath(buffer: AudioBuffer, width: number, height: number, points = 72) {
+function wrapSeconds(value: number, duration: number) {
+  if (duration <= 0) return 0;
+  return ((value % duration) + duration) % duration;
+}
+
+function getShiftedTrackPhase(track: Track, transportSeconds: number, bpm: number) {
+  const loopSeconds = getTrackSeconds(track, bpm);
+  return wrapSeconds(transportSeconds - track.offsetMs / 1000, loopSeconds);
+}
+
+function keyPromptSuffix(key: string) {
+  return key === 'None' ? '' : `, in ${key}`;
+}
+
+function makeWaveformPath(buffer: AudioBuffer, width: number, height: number, offsetMs = 0, points = 96) {
   const channel = buffer.getChannelData(0);
   const step = Math.max(1, Math.floor(channel.length / points));
+  const shiftSamples = Math.round((offsetMs / 1000) * buffer.sampleRate);
   const mid = height / 2;
   const coords: string[] = [];
   for (let i = 0; i < points; i++) {
     let peak = 0;
     const start = i * step;
     const end = Math.min(channel.length, start + step);
-    for (let j = start; j < end; j++) peak = Math.max(peak, Math.abs(channel[j]));
+    for (let j = start; j < end; j++) {
+      const shifted = wrapSeconds(j - shiftSamples, channel.length);
+      peak = Math.max(peak, Math.abs(channel[shifted]));
+    }
     const x = (i / (points - 1)) * width;
     const y = mid - peak * (height * 0.42);
     coords.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`);
@@ -335,7 +385,10 @@ function makeWaveformPath(buffer: AudioBuffer, width: number, height: number, po
     let peak = 0;
     const start = i * step;
     const end = Math.min(channel.length, start + step);
-    for (let j = start; j < end; j++) peak = Math.max(peak, Math.abs(channel[j]));
+    for (let j = start; j < end; j++) {
+      const shifted = wrapSeconds(j - shiftSamples, channel.length);
+      peak = Math.max(peak, Math.abs(channel[shifted]));
+    }
     const x = (i / (points - 1)) * width;
     const y = mid + peak * (height * 0.42);
     coords.push(`L ${x.toFixed(1)} ${y.toFixed(1)}`);
@@ -365,7 +418,7 @@ function repeatMidiNotes(notes: MidiNote[], loopSeconds: number, totalSeconds: n
 }
 
 function CaptureGraphic({track, bpm}: {track: Track; bpm: number}) {
-  const width = 360;
+  const width = 720;
   const height = 54;
   const source = track.sourceBuffer;
   if (!source) {
@@ -385,11 +438,20 @@ function CaptureGraphic({track, bpm}: {track: Track; bpm: number}) {
     return (
       <svg className="capture-graphic" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
         <rect x="0" y="0" width={width} height={height} />
-        {notes.map((note, index) => {
-          const x = (note.start / seconds) * width;
-          const w = Math.max(4, (note.duration / seconds) * width);
+        {notes.flatMap((note, index) => {
+          const shiftedStart = wrapSeconds(note.start + track.offsetMs / 1000, seconds);
+          const segments = shiftedStart + note.duration > seconds
+            ? [
+                {start: shiftedStart, duration: seconds - shiftedStart},
+                {start: 0, duration: shiftedStart + note.duration - seconds},
+              ]
+            : [{start: shiftedStart, duration: note.duration}];
           const y = height - 8 - ((note.note - minNote) / noteRange) * (height - 16);
-          return <rect key={`${note.note}-${index}`} className="midi-note" x={x} y={y} width={w} height="5" rx="1" />;
+          return segments.map((segment, segmentIndex) => {
+            const x = (segment.start / seconds) * width;
+            const w = Math.max(4, (segment.duration / seconds) * width);
+            return <rect key={`${note.note}-${index}-${segmentIndex}`} className="midi-note" x={x} y={y} width={w} height="5" rx="1" />;
+          });
         })}
       </svg>
     );
@@ -398,7 +460,7 @@ function CaptureGraphic({track, bpm}: {track: Track; bpm: number}) {
   return (
     <svg className="capture-graphic" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
       <rect x="0" y="0" width={width} height={height} />
-      <path className="waveform" d={makeWaveformPath(source, width, height)} />
+      <path className="waveform" d={makeWaveformPath(source, width, height, track.offsetMs)} />
     </svg>
   );
 }
@@ -431,6 +493,7 @@ function App() {
   const lastMetronomeBeatRef = useRef(-1);
   const timersRef = useRef<number[]>([]);
   const midiNotesRef = useRef<MidiNote[]>([]);
+  const midiRecordStartRef = useRef(0);
   const midiHeldRef = useRef<Map<number, {velocity: number; start: number}>>(new Map());
   const liveOscRef = useRef<Map<number, {osc: OscillatorNode; gain: GainNode}>>(new Map());
   const recordStateRef = useRef<RecordState>({mode: 'idle'});
@@ -504,7 +567,9 @@ function App() {
       const buffer = getPlayableBuffer(track);
       if (!track.active || !buffer) return;
       const loopSeconds = getTrackSeconds(track, bpmRef.current);
-      const offset = alignToTransport && loopSeconds > 0 ? elapsedAtStart % loopSeconds : 0;
+      const offset = alignToTransport && loopSeconds > 0
+        ? getShiftedTrackPhase(track, elapsedAtStart, bpmRef.current)
+        : wrapSeconds(-track.offsetMs / 1000, loopSeconds);
       const source = context.createBufferSource();
       const gain = context.createGain();
       source.buffer = buffer;
@@ -738,14 +803,16 @@ function App() {
       const held = midiHeldRef.current.get(note);
       const currentRecordState = recordStateRef.current;
       if (held && currentRecordState.mode === 'recording') {
-        const loopStart = startedAtRef.current || now;
+        const loopStart = midiRecordStartRef.current || now;
         const seconds = trackDuration(currentRecordState.trackId);
-        const start = ((held.start - loopStart) % seconds + seconds) % seconds;
+        const start = clamp(held.start - loopStart, 0, seconds);
+        const maxDuration = Math.max(0.05, seconds - start);
+        const duration = clamp(now - Math.max(held.start, loopStart), 0.05, maxDuration);
         midiNotesRef.current.push({
           note,
           velocity: held.velocity,
           start,
-          duration: clamp(now - held.start, 0.05, seconds),
+          duration,
         });
       }
       midiHeldRef.current.delete(note);
@@ -757,7 +824,6 @@ function App() {
     if (!ready) return;
     clearTimers();
     midiNotesRef.current = [];
-    midiHeldRef.current.clear();
     const wait = countInMs();
     const startMs = performance.now() + wait;
     const seconds = trackDuration(trackId);
@@ -767,8 +833,19 @@ function App() {
     scheduleCountInClicks(wait);
     timersRef.current.push(window.setTimeout(() => {
       midiNotesRef.current = [];
+      midiRecordStartRef.current = getAudioContext().currentTime;
     }, wait));
     timersRef.current.push(window.setTimeout(async () => {
+      const recordEnd = getAudioContext().currentTime;
+      const recordStart = midiRecordStartRef.current;
+      midiHeldRef.current.forEach((held, note) => {
+        const start = clamp(held.start - recordStart, 0, seconds);
+        const maxDuration = Math.max(0.05, seconds - start);
+        const duration = clamp(recordEnd - Math.max(held.start, recordStart), 0.05, maxDuration);
+        if (duration > 0) {
+          midiNotesRef.current.push({note, velocity: held.velocity, start, duration});
+        }
+      });
       const notes = midiNotesRef.current;
       const buffer = await renderMidiNotes(notes, seconds);
       setTrackSourceBuffer(trackId, buffer, {kind: 'midi', notes});
@@ -795,6 +872,7 @@ function App() {
           prompt: track.prompt,
           duration: stableAudioPlan.requestSeconds,
           initNoiseLevel: track.initNoiseLevel,
+          cfg: track.stableAudioCfg,
           steps: 8,
           audioBase64,
         }),
@@ -824,7 +902,7 @@ function App() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        prompt: track.prompt,
+        prompt: `${track.prompt}${keyPromptSuffix(track.key)}`,
         model,
         bpm,
         duration: requestSeconds,
@@ -856,8 +934,23 @@ function App() {
     updateTracks((current) => [...current, makeTrack(current.length)]);
   };
 
+  const renameTracks = (items: Track[]) => items.map((track, index) => ({...track, name: `LOOP ${index + 1}`}));
+
   const clearTrack = (trackId: string) => {
     updateTracks((current) => current.map((track) => track.id === trackId ? {...track, sourceBuffer: null, transformedBuffer: null, playbackMode: 'source', notes: [], kind: 'audio'} : track));
+  };
+
+  const deleteTrack = (trackId: string) => {
+    if (tracksRef.current.length <= 1) {
+      clearTrack(trackId);
+      return;
+    }
+    updateTracks((current) => {
+      const next = renameTracks(current.filter((track) => track.id !== trackId));
+      const selectedStillExists = next.some((track) => track.id === selectedTrackId);
+      if (!selectedStillExists) setSelectedTrackId(next[0]?.id ?? null);
+      return next;
+    });
   };
 
   const changeTrackBars = async (trackId: string, bars: number) => {
@@ -874,6 +967,14 @@ function App() {
   };
 
   const keyboardNotes = ['A', 'W', 'S', 'E', 'D', 'F', 'T', 'G', 'Y', 'H', 'U', 'J'];
+  const selectedTransformType = selectedTrack?.sourceBuffer
+    ? selectedTrack.kind
+    : 'generate';
+  const selectedTransformLabel = selectedTransformType === 'audio'
+    ? 'Transform Audio'
+    : selectedTransformType === 'midi'
+      ? 'Transform MIDI'
+      : 'Generate';
 
   return (
     <main className="app">
@@ -977,8 +1078,7 @@ function App() {
                 </button>
                 <button className="icon-button red" onClick={() => recordAudio(track.id)} title="Record audio"><Mic size={16} /></button>
                 <button className="icon-button yellow" onClick={() => recordMidi(track.id)} title="Record MIDI"><Piano size={16} /></button>
-                <button className="icon-button blue" onClick={() => transformWithMagenta(track.id)} title="Apply Magenta transform"><Wand2 size={16} /></button>
-                <button className="icon-button" onClick={() => clearTrack(track.id)} title="Clear"><Trash2 size={16} /></button>
+                <button className="icon-button" onClick={() => deleteTrack(track.id)} title={tracks.length <= 1 ? 'Clear loop' : 'Delete loop'}><Trash2 size={16} /></button>
                 <label className="mini-select" title="Loop bars">
                   <span>BARS</span>
                   <select
@@ -1014,16 +1114,6 @@ function App() {
         </div>
 
         <aside className="control-bay">
-          <div className="scope">
-            {tracks.map((track, index) => (
-              <div key={track.id} className="scope-row">
-                <div className="scope-progress" style={{left: `${((playhead % getTrackSeconds(track, bpm)) / getTrackSeconds(track, bpm)) * 100}%`}} />
-                <span style={{background: track.color, transform: `scaleX(${track.sourceBuffer ? 1 : 0.08})`}} />
-                <i>{index + 1}</i>
-              </div>
-            ))}
-          </div>
-
           <div className="patch-panel">
             <h2>{selectedTrack?.name ?? 'Loop'} Patch</h2>
             <div className="prompt-box">
@@ -1038,77 +1128,157 @@ function App() {
             </div>
             {selectedTrack && (
               <div className="detail-sliders">
-                <label>
-                  <span>Prompt strength</span>
-                  <strong>{selectedTrack.promptStrength.toFixed(1)}</strong>
-                  <input
-                    type="range"
-                    min="-1"
-                    max="7"
-                    step="0.1"
-                    value={selectedTrack.promptStrength}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, promptStrength: value} : track), false);
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Init noise</span>
-                  <strong>{selectedTrack.initNoiseLevel.toFixed(2)}</strong>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={selectedTrack.initNoiseLevel}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, initNoiseLevel: value} : track), false);
-                    }}
-                  />
-                </label>
-                <div className="detail-toggles">
+                <section className="detail-section">
+                  <h3>Loop Timing</h3>
                   <label>
+                    <span>Shift</span>
+                    <strong>{selectedTrack.offsetMs}ms</strong>
                     <input
-                      type="checkbox"
-                      checked={selectedTrack.drumless}
+                      type="range"
+                      min="-500"
+                      max="500"
+                      step="5"
+                      value={selectedTrack.offsetMs}
                       onChange={(event) => {
-                        const checked = event.target.checked;
-                        updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, drumless: checked} : track), false);
+                        const value = Number(event.target.value);
+                        updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, offsetMs: value} : track));
                       }}
                     />
-                    <span>No drums</span>
                   </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedTrack.doubleGenerate}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, doubleGenerate: checked} : track), false);
-                      }}
-                    />
-                    <span>Double gen</span>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedTrack.smoothFade}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, smoothFade: checked} : track), false);
-                      }}
-                    />
-                    <span>Smooth fade</span>
-                  </label>
-                </div>
+                </section>
+
+                {(selectedTransformType === 'midi' || selectedTransformType === 'generate') && (
+                  <section className="detail-section">
+                    <h3>{selectedTransformType === 'generate' ? 'Magenta Generate' : 'Magenta MIDI Transform'}</h3>
+                    <label>
+                      <span>Magenta strength</span>
+                      <strong>{selectedTrack.promptStrength.toFixed(1)}</strong>
+                      <input
+                        type="range"
+                        min="-1"
+                        max="7"
+                        step="0.1"
+                        value={selectedTrack.promptStrength}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, promptStrength: value} : track), false);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>Key</span>
+                      <strong>{selectedTrack.key}</strong>
+                      <select
+                        value={selectedTrack.key}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, key: value} : track), false);
+                        }}
+                      >
+                        {KEY_OPTIONS.map((key) => <option key={key} value={key}>{key}</option>)}
+                      </select>
+                    </label>
+                    <div className="detail-toggles">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrack.drumless}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, drumless: checked} : track), false);
+                          }}
+                        />
+                        <span>No drums</span>
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrack.doubleGenerate}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, doubleGenerate: checked} : track), false);
+                          }}
+                        />
+                        <span>Double gen</span>
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrack.smoothFade}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, smoothFade: checked} : track), false);
+                          }}
+                        />
+                        <span>Smooth fade</span>
+                      </label>
+                    </div>
+                  </section>
+                )}
+
+                {selectedTransformType === 'audio' && (
+                  <section className="detail-section">
+                    <h3>Stable Audio Transform</h3>
+                    <label>
+                      <span>SA3 strength</span>
+                      <strong>{selectedTrack.stableAudioCfg.toFixed(1)}</strong>
+                      <input
+                        type="range"
+                        min="0"
+                        max="5"
+                        step="0.1"
+                        value={selectedTrack.stableAudioCfg}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, stableAudioCfg: value} : track), false);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>Init noise</span>
+                      <strong>{selectedTrack.initNoiseLevel.toFixed(2)}</strong>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={selectedTrack.initNoiseLevel}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, initNoiseLevel: value} : track), false);
+                        }}
+                      />
+                    </label>
+                    <div className="detail-toggles">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrack.doubleGenerate}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, doubleGenerate: checked} : track), false);
+                          }}
+                        />
+                        <span>Double gen</span>
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrack.smoothFade}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, smoothFade: checked} : track), false);
+                          }}
+                        />
+                        <span>Smooth fade</span>
+                      </label>
+                    </div>
+                  </section>
+                )}
               </div>
             )}
             <div className="action-grid">
-              <button onClick={() => selectedTrack && recordAudio(selectedTrack.id)}><Mic size={18} /> Audio</button>
-              <button onClick={() => selectedTrack && recordMidi(selectedTrack.id)}><Piano size={18} /> MIDI</button>
-              <button onClick={() => selectedTrack && transformWithMagenta(selectedTrack.id)}><Wand2 size={18} /> Transform</button>
+              <button onClick={() => selectedTrack && transformWithMagenta(selectedTrack.id)}><Wand2 size={18} /> {selectedTransformLabel}</button>
             </div>
           </div>
 
@@ -1125,12 +1295,6 @@ function App() {
             </div>
           </div>
 
-          <div className="architecture">
-            <h2>Signal Plan</h2>
-            <p><Circle size={10} /> Browser transport, capture, MIDI and WebAudio loops.</p>
-            <p><Circle size={10} /> Python backend for prompt-to-audio Magenta generation.</p>
-            <p><Circle size={10} /> Later: swap backend for streaming C++ engine and audio-to-audio transforms.</p>
-          </div>
         </aside>
       </section>
     </main>

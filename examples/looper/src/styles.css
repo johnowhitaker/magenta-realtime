@@ -229,16 +229,8 @@ h2 {
 }
 
 .track-card.selected {
-  outline: 3px solid var(--track-color);
+  outline: 3px solid #75f0d1;
   outline-offset: 3px;
-}
-
-.track-card::before {
-  content: "";
-  align-self: stretch;
-  width: 12px;
-  background: var(--track-color);
-  border: 2px solid #111;
 }
 
 .track-leds {
@@ -426,52 +418,14 @@ h2 {
   gap: 14px;
 }
 
-.scope, .patch-panel, .keys, .architecture {
+.patch-panel, .keys {
   border: 3px solid #080808;
   background: #1a1a19;
   box-shadow: 6px 6px 0 #000;
   padding: 14px;
 }
 
-.scope {
-  height: 190px;
-  position: relative;
-  overflow: hidden;
-}
-
-.scope-row {
-  height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  position: relative;
-}
-
-.scope-row span {
-  height: 16px;
-  width: 100%;
-  transform-origin: left;
-  border: 1px solid #000;
-  transition: transform 180ms ease;
-}
-
-.scope-progress {
-  position: absolute;
-  top: 5px;
-  bottom: 5px;
-  width: 2px;
-  background: #fff;
-  box-shadow: 0 0 0 1px #000;
-  z-index: 2;
-}
-
-.scope-row i {
-  font-style: normal;
-  font-size: 10px;
-  color: #d8cfb4;
-}
-
-.patch-panel, .keys, .architecture {
+.patch-panel, .keys {
   display: grid;
   gap: 12px;
 }
@@ -489,7 +443,23 @@ h2 {
 
 .detail-sliders {
   display: grid;
+  gap: 12px;
+}
+
+.detail-section {
+  display: grid;
   gap: 10px;
+  border-top: 2px solid #33312d;
+  padding-top: 10px;
+}
+
+.detail-section h3 {
+  margin: 0;
+  color: #f7f1df;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .detail-sliders label {
@@ -512,10 +482,23 @@ h2 {
   font-size: 12px;
 }
 
-.detail-sliders input {
+.detail-sliders input,
+.detail-sliders select {
   grid-column: 1 / -1;
   width: 100%;
+}
+
+.detail-sliders input {
   accent-color: #75f0d1;
+}
+
+.detail-sliders select {
+  height: 34px;
+  border: 2px solid #080808;
+  background: #f7f1df;
+  color: #111;
+  padding: 0 8px;
+  font-weight: 850;
 }
 
 .detail-toggles {
@@ -586,15 +569,6 @@ h2 {
 
 .keyboard span.down {
   background: #75f0d1;
-}
-
-.architecture p {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #d8cfb4;
-  font-size: 13px;
-  line-height: 1.4;
 }
 
 @media (max-width: 900px) {

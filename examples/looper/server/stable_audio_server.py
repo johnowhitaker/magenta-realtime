@@ -55,6 +55,7 @@ def _generate_audio_to_audio(payload: dict[str, Any]) -> tuple[bytes, dict[str, 
   prompt = str(payload.get("prompt") or "cassette tape music loop")
   duration = _clamp(float(payload.get("duration") or 8.0), 1.0, 65.0)
   init_noise_level = _clamp(float(payload.get("initNoiseLevel") or 0.5), 0.0, 1.0)
+  cfg = _clamp(float(payload.get("cfg") or 1.0), 0.0, 10.0)
   steps = int(_clamp(float(payload.get("steps") or 8), 1.0, 32.0))
 
   with tempfile.TemporaryDirectory(prefix="sa3-loop-") as tmpdir:
@@ -80,6 +81,8 @@ def _generate_audio_to_audio(payload: dict[str, Any]) -> tuple[bytes, dict[str, 
         f"{duration:.3f}",
         "--steps",
         str(steps),
+        "--cfg",
+        f"{cfg:.3f}",
         "--out",
         str(output_wav),
     ]
@@ -108,6 +111,7 @@ def _generate_audio_to_audio(payload: dict[str, Any]) -> tuple[bytes, dict[str, 
         "prompt": prompt,
         "duration": duration,
         "initNoiseLevel": init_noise_level,
+        "cfg": cfg,
         "steps": steps,
         "elapsed": elapsed,
         "model": "sm-music",

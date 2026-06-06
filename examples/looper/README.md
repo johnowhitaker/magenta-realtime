@@ -70,19 +70,26 @@ Open <http://127.0.0.1:62430/>.
 ## Controls
 
 - Each track has its own loop length in 1, 2, 4, 8, or 16 bar increments.
+- Tracks can be added, deleted, or cleared when only one track remains.
 - Audio tracks record source audio locally, then use Stable Audio 3 for
   audio-to-audio transforms.
 - MIDI tracks render a local synth source loop, then use Magenta with note
   guidance for transforms.
-- `Prompt strength` controls Magenta's MusicCoCa CFG strength.
+- Empty tracks generate fresh audio with Magenta from the prompt.
+- `Magenta strength` controls Magenta's MusicCoCa CFG strength.
+- `SA3 strength` controls Stable Audio's CFG strength.
 - `Init noise` controls Stable Audio's `init_noise_level` for audio-to-audio
-  transforms. The default is `0.50`.
+  transforms. The default is `0.35`.
+- `Key` appends a major/minor key hint to Magenta prompts. BPM is added
+  automatically by the Magenta backend.
 - `No drums` passes Magenta's drum conditioning token `0`, which the model API
   documents as "no drum"; leaving it off masks the drum token so the model can
   decide.
+- `Shift` offsets loop playback and visual playhead alignment in milliseconds
+  with wraparound, which is useful for compensating capture latency.
 - `Double gen` and `Smooth fade` are experimental loop-polishing options. Stable
   Audio always receives a longer repeated input window for short loops before
-  the final loop is cropped back into place.
+  the final loop is cropped back into place. Both are on by default.
 
 ## Notes
 
