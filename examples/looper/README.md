@@ -70,13 +70,18 @@ Open <http://127.0.0.1:62430/>.
 ## Controls
 
 - Each track has its own loop length in 1, 2, 4, 8, or 16 bar increments.
-- Tracks can be added, deleted, or cleared when only one track remains.
+- Tracks can be added, duplicated, deleted, or cleared without deleting the
+  track slot.
 - Audio tracks record source audio locally, then use Stable Audio 3 for
   audio-to-audio transforms.
 - MIDI tracks render a local synth source loop, then use Magenta with note
   guidance for transforms.
 - Empty tracks generate fresh audio with Magenta from the prompt.
-- `Magenta strength` controls Magenta's MusicCoCa CFG strength.
+- Recording starts at the selected loop's next loop boundary when transport is
+  running, or immediately when stopped.
+- `Prompt strength` controls Magenta's MusicCoCa CFG strength.
+- `Note strength` controls Magenta's MIDI/note CFG strength for MIDI
+  transforms.
 - `SA3 strength` controls Stable Audio's CFG strength.
 - `Init noise` controls Stable Audio's `init_noise_level` for audio-to-audio
   transforms. The default is `0.35`.

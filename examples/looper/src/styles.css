@@ -291,7 +291,7 @@ h2 {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-  max-width: 260px;
+  max-width: 286px;
 }
 
 .icon-button {
@@ -305,8 +305,22 @@ h2 {
 .icon-button.yellow { background: #ffe45e; }
 .icon-button.blue { background: #4cb7ff; }
 
+.volume-row {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.volume-row span {
+  font-size: 9px;
+  font-weight: 950;
+}
+
 .volume {
-  width: 120px;
+  width: 100%;
   accent-color: var(--track-color);
 }
 

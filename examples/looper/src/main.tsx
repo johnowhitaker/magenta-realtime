@@ -2,7 +2,9 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {
   Bot,
+  Copy,
   Disc3,
+  Eraser,
   Mic,
   Pause,
   Piano,
@@ -29,6 +31,7 @@ type Track = {
   transformedBuffer: AudioBuffer | null;
   playbackMode: 'source' | 'transformed';
   promptStrength: number;
+  noteStrength: number;
   stableAudioCfg: number;
   initNoiseLevel: number;
   key: string;
@@ -101,6 +104,7 @@ function makeTrack(index: number, kind: TrackKind = 'audio'): Track {
     transformedBuffer: null,
     playbackMode: 'source',
     promptStrength: 3,
+    noteStrength: 4,
     stableAudioCfg: 1,
     initNoiseLevel: 0.35,
     key: 'None',
@@ -683,17 +687,20 @@ function App() {
     return track ? getTrackSeconds(track, bpm) : barsToSeconds(2, bpm);
   };
 
-  const countInMs = () => {
-    if (!isPlaying) return beatSeconds * 1000;
+  const waitUntilTrackStartMs = (trackId: string) => {
+    const track = tracksRef.current.find((candidate) => candidate.id === trackId);
+    if (!track || !isPlayingRef.current) return 0;
     const context = getAudioContext();
     const elapsed = Math.max(0, context.currentTime - startedAtRef.current);
-    const beatPos = elapsed / beatSeconds;
-    const remainder = 4 - (beatPos % 4);
-    return (remainder < 0.08 ? 4 : remainder) * beatSeconds * 1000;
+    const loopSeconds = getTrackSeconds(track, bpmRef.current);
+    const phase = getShiftedTrackPhase(track, elapsed, bpmRef.current);
+    if (phase < 0.035 || loopSeconds - phase < 0.035) return 0;
+    return (loopSeconds - phase) * 1000;
   };
 
   const scheduleCountInClicks = (waitMs: number) => {
     if (!metronomeEnabledRef.current) return;
+    if (waitMs <= 0) return;
     const beats = Math.max(1, Math.ceil(waitMs / (beatSeconds * 1000)));
     for (let i = 0; i < beats; i++) {
       const delay = Math.max(0, waitMs - (beats - i) * beatSeconds * 1000);
@@ -734,10 +741,10 @@ function App() {
       setStatus(`Captured ${seconds.toFixed(1)}s audio loop.`);
     };
 
-    const wait = countInMs();
+    const wait = waitUntilTrackStartMs(trackId);
     const startMs = performance.now() + wait;
     const durationMs = trackDuration(trackId) * 1000;
-    setStatus('Audio armed. Recording starts on the next bar edge.');
+    setStatus(wait > 0 ? 'Audio armed. Recording starts at this loop start.' : 'Recording audio loop.');
     updateCountdown('audio', trackId, startMs, durationMs);
     scheduleCountInClicks(wait);
     timersRef.current.push(window.setTimeout(() => recorder.start(), wait));
@@ -824,11 +831,11 @@ function App() {
     if (!ready) return;
     clearTimers();
     midiNotesRef.current = [];
-    const wait = countInMs();
+    const wait = waitUntilTrackStartMs(trackId);
     const startMs = performance.now() + wait;
     const seconds = trackDuration(trackId);
     const durationMs = seconds * 1000;
-    setStatus('MIDI armed. Recording starts on the next bar edge.');
+    setStatus(wait > 0 ? 'MIDI armed. Recording starts at this loop start.' : 'Recording MIDI loop.');
     updateCountdown('midi', trackId, startMs, durationMs);
     scheduleCountInClicks(wait);
     timersRef.current.push(window.setTimeout(() => {
@@ -909,7 +916,7 @@ function App() {
         temperature: 1.25,
         topK: 40,
         cfgMusicCoCa: track.promptStrength,
-        cfgNotes: track.notes.length ? 4.0 : 1.0,
+        cfgNotes: track.notes.length ? track.noteStrength : 1.0,
         cfgDrums: 1.0,
         drums: track.drumless ? [0] : undefined,
         midiNotes,
@@ -940,6 +947,25 @@ function App() {
     updateTracks((current) => current.map((track) => track.id === trackId ? {...track, sourceBuffer: null, transformedBuffer: null, playbackMode: 'source', notes: [], kind: 'audio'} : track));
   };
 
+  const duplicateTrack = (trackId: string) => {
+    updateTracks((current) => {
+      const index = current.findIndex((track) => track.id === trackId);
+      if (index < 0) return current;
+      const track = current[index];
+      const duplicate: Track = {
+        ...track,
+        id: crypto.randomUUID(),
+        name: `LOOP ${current.length + 1}`,
+        active: true,
+        armed: false,
+        notes: track.notes.map((note) => ({...note})),
+      };
+      const next = [...current.slice(0, index + 1), duplicate, ...current.slice(index + 1)];
+      setSelectedTrackId(duplicate.id);
+      return renameTracks(next);
+    });
+  };
+
   const deleteTrack = (trackId: string) => {
     if (tracksRef.current.length <= 1) {
       clearTrack(trackId);
@@ -967,14 +993,14 @@ function App() {
   };
 
   const keyboardNotes = ['A', 'W', 'S', 'E', 'D', 'F', 'T', 'G', 'Y', 'H', 'U', 'J'];
+  const getTrackTransformLabel = (track: Track) => {
+    if (!track.sourceBuffer) return 'Generate';
+    return track.kind === 'audio' ? 'Transform Audio' : 'Transform MIDI';
+  };
   const selectedTransformType = selectedTrack?.sourceBuffer
     ? selectedTrack.kind
     : 'generate';
-  const selectedTransformLabel = selectedTransformType === 'audio'
-    ? 'Transform Audio'
-    : selectedTransformType === 'midi'
-      ? 'Transform MIDI'
-      : 'Generate';
+  const selectedTransformLabel = selectedTrack ? getTrackTransformLabel(selectedTrack) : 'Generate';
 
   return (
     <main className="app">
@@ -1026,7 +1052,7 @@ function App() {
           <span>
             {recordState.mode === 'idle'
               ? status
-              : `${recordState.mode === 'count-in' ? 'COUNT-IN' : 'REC'} ${recordState.remaining.toFixed(1)}s`}
+              : `${recordState.mode === 'count-in' ? 'WAIT LOOP' : 'REC'} ${recordState.remaining.toFixed(1)}s`}
           </span>
         </div>
       </section>
@@ -1078,6 +1104,9 @@ function App() {
                 </button>
                 <button className="icon-button red" onClick={() => recordAudio(track.id)} title="Record audio"><Mic size={16} /></button>
                 <button className="icon-button yellow" onClick={() => recordMidi(track.id)} title="Record MIDI"><Piano size={16} /></button>
+                <button className="icon-button blue" onClick={() => transformWithMagenta(track.id)} title={getTrackTransformLabel(track)}><Wand2 size={16} /></button>
+                <button className="icon-button" onClick={() => duplicateTrack(track.id)} title="Duplicate loop"><Copy size={16} /></button>
+                <button className="icon-button" onClick={() => clearTrack(track.id)} title="Clear capture"><Eraser size={16} /></button>
                 <button className="icon-button" onClick={() => deleteTrack(track.id)} title={tracks.length <= 1 ? 'Clear loop' : 'Delete loop'}><Trash2 size={16} /></button>
                 <label className="mini-select" title="Loop bars">
                   <span>BARS</span>
@@ -1097,16 +1126,18 @@ function App() {
                     {track.playbackMode === 'source' ? 'SRC' : 'AI'}
                   </button>
                 )}
-                <input
-                  className="volume"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={track.volume}
-                  onChange={(event) => updateTracks((current) => current.map((item) => item.id === track.id ? {...item, volume: Number(event.target.value)} : item), false)}
-                  title="Volume"
-                />
+                <label className="volume-row" title="Volume">
+                  <span>VOL</span>
+                  <input
+                    className="volume"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={track.volume}
+                    onChange={(event) => updateTracks((current) => current.map((item) => item.id === track.id ? {...item, volume: Number(event.target.value)} : item), false)}
+                  />
+                </label>
               </div>
               <div className="track-number">{String(index + 1).padStart(2, '0')}</div>
             </article>
@@ -1151,7 +1182,7 @@ function App() {
                   <section className="detail-section">
                     <h3>{selectedTransformType === 'generate' ? 'Magenta Generate' : 'Magenta MIDI Transform'}</h3>
                     <label>
-                      <span>Magenta strength</span>
+                      <span>Prompt strength</span>
                       <strong>{selectedTrack.promptStrength.toFixed(1)}</strong>
                       <input
                         type="range"
@@ -1165,6 +1196,23 @@ function App() {
                         }}
                       />
                     </label>
+                    {selectedTransformType === 'midi' && (
+                      <label>
+                        <span>Note strength</span>
+                        <strong>{selectedTrack.noteStrength.toFixed(1)}</strong>
+                        <input
+                          type="range"
+                          min="-1"
+                          max="7"
+                          step="0.1"
+                          value={selectedTrack.noteStrength}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            updateTracks((current) => current.map((track) => track.id === selectedTrack.id ? {...track, noteStrength: value} : track), false);
+                          }}
+                        />
+                      </label>
+                    )}
                     <label>
                       <span>Key</span>
                       <strong>{selectedTrack.key}</strong>
